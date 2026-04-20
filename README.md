@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="gieok.png" alt="GIEOK — Memory for Claude Code + LLM Wiki" width="540">
+</p>
+
 # GIEOK
 ### Memory for Claude Code
 
