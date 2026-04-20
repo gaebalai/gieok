@@ -78,6 +78,10 @@ Claude Code 세션을 자동으로 기록하고, Obsidian Vault 위에 구조화
 ### ⚡ 원라이너 설치 (가장 빠름)
 
 ```bash
+# npm (npx) — Node 18+ 설치돼 있으면
+npx gieok
+
+# 또는 curl
 curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash
 ```
 

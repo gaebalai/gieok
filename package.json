@@ -1,0 +1,48 @@
+{
+  "name": "gieok",
+  "version": "0.2.0",
+  "description": "Memory for Claude Code — automatic session capture and LLM-curated Obsidian Wiki.",
+  "bin": {
+    "gieok": "bin/gieok.mjs"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "files": [
+    "bin/gieok.mjs",
+    "install.sh",
+    "README.md",
+    "LICENSE",
+    "gieok.png"
+  ],
+  "keywords": [
+    "claude-code",
+    "claude",
+    "memory",
+    "wiki",
+    "obsidian",
+    "llm",
+    "mcp",
+    "anthropic",
+    "second-brain"
+  ],
+  "homepage": "https://github.com/gaebalai/gieok#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gaebalai/gieok.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gaebalai/gieok/issues"
+  },
+  "author": "gaebalai",
+  "license": "MIT",
+  "preferGlobal": true,
+  "scripts": {
+    "postinstall": "node -e \"process.stdout.write('\\n  Run `npx gieok` to start installation.\\n\\n')\"  || exit 0"
+  }
+}

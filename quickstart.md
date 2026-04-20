@@ -1,3 +1,36 @@
+# Quickstart
+
+## ⚡ 원라이너 설치 (가장 빠름)
+
+```bash
+# npm (npx)
+npx gieok
+
+# 또는 curl
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash
+```
+
+저장소를 `~/.local/share/gieok/repo`에 clone하고, Vault(`~/gieok/main-gieok`)를 초기화하고, Hook · LaunchAgent · 스킬 · qmd 검색까지 한 번에 설치합니다.
+
+```bash
+# 비대화형 (모두 기본값)
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash -s -- --yes
+
+# 코어만 (스케줄 · qmd · skills 제외)
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash -s -- --minimal
+
+# Vault 경로 지정
+GIEOK_VAULT=~/my-vault curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash
+
+# 업데이트 / 제거
+bash ~/.local/share/gieok/repo/install.sh
+bash ~/.local/share/gieok/repo/install.sh --uninstall
+```
+
+설치 후 Claude Code를 재시작하면 Hook이 적용됩니다. 전체 옵션은 `bash install.sh --help`로 확인하세요.
+
+---
+
 # auto-ingest.sh 실행 방법
 
 ## 1. 기본 실행 (수동)
