@@ -71,7 +71,31 @@ Claude Code 세션을 자동으로 기록하고, Obsidian Vault 위에 구조화
 >
 > 전체 운영을 활성화하기 전에 `GIEOK_DRY_RUN=1`로 파이프라인을 먼저 확인하는 것을 권장합니다.
 
-### 🚀 인터랙티브 설정 (권장)
+### ⚡ 원라이너 설치 (가장 빠름)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash
+```
+
+저장소를 `~/.local/share/gieok/repo`에 clone하고, Vault(`~/gieok/main-gieok`)를 초기화하고, Hook·LaunchAgent·스킬·qmd 검색까지 순서대로 설치합니다. 비대화형 실행은 `-s -- --yes`, 코어만 설치는 `-s -- --minimal`을 붙이세요.
+
+```bash
+# 완전 비대화형 (기본값으로 모두 설치)
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash -s -- --yes
+
+# 코어만 (스케줄·qmd·skills 제외)
+curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash -s -- --minimal
+
+# Vault 경로 지정
+GIEOK_VAULT=~/my-vault curl -fsSL https://raw.githubusercontent.com/gaebalai/gieok/main/install.sh | bash
+
+# 제거
+bash ~/.local/share/gieok/repo/install.sh --uninstall
+```
+
+설치 후 Claude Code를 재시작하면 Hook이 적용됩니다. 옵션 전체는 `bash install.sh --help`로 확인할 수 있습니다.
+
+### 🚀 인터랙티브 설정
 
 > [!NOTE]
 > Claude Code에서 다음을 입력하면 인터랙티브 가이드 설정이 시작됩니다. 각 단계의 목적을 설명하고 환경에 맞게 조정합니다.
