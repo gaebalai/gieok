@@ -1,0 +1,42 @@
+# 세션 로그는 머신별로 로컬에 보관 (Git에 포함하지 않음)
+# (하위의 .claude-brain/도 함께 제외됨)
+session-logs/
+
+# PDF 추출 중간 캐시 (머신별로 재생성되므로 Git 관리 대상 외)
+.cache/
+
+# URL pre-step이 가져온 raw HTML (gitignored, debug / 재추출용, 기능 2.2)
+# .cache/로 이미 제외되지만, 의도를 명시하기 위해 개별 항목을 남김
+.cache/html/
+
+# Obsidian 설정 파일 (머신별로 다르므로)
+.obsidian/
+
+# macOS
+.DS_Store
+
+# 임시 파일
+*.tmp
+*.swp
+
+# GIEOK MCP / auto-ingest의 공유 lockfile (기능 2.1)
+# cron / MCP가 점유한 순간을 실수로 commit하면 stale 오판을 유발하므로 제외
+.gieok-mcp.lock
+
+# GIEOK v0.3.5 Option B: detached claude -p의 PID tracking 파일
+# 배타가 아닌 관측용 (auto-ingest는 무시함). background 요약 중에만 존재하고,
+# commit 대상이 되면 stale PID를 영구화하므로 제외.
+.gieok-summary-*.lock
+
+# 기능 2.2 operator 알림 플래그 (2026-04-20 MED-d3 fix)
+# GIEOK_URL_ALLOW_LOOPBACK / GIEOK_URL_IGNORE_ROBOTS가 production에 leak되었을
+# 때 MCP 서버가 timestamp를 기록하는 디렉터리. auto-lint 자가 진단이 인식.
+.gieok-alerts/
+
+# 기능 2.2 URL 수집의 이미지 로컬 저장 영역 (2026-04-20 security-review HIGH-c1 fix)
+# 공격자가 제어하는 HTML이 20MB × N장의 이미지를 심으면 Vault Git 리포를
+# 비대화시키는 공격 (공개·동기화 Mac으로 파급, 이력 영구 잔존)을 막기 위해,
+# 이미지 바이너리는 "로컬 보관·Obsidian 표시용" 용도로 한정하고 Git에서는 제외.
+# 원본 본문 Markdown (raw-sources/**/fetched/*.md)은 계속 Git 추적한다.
+# 기존 사용자는 `git rm -rf --cached raw-sources/**/fetched/media`로 마이그레이션.
+raw-sources/**/fetched/media/

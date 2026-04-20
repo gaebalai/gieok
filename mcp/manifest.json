@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "gieok-wiki",
+  "display_name": "GIEOK Wiki",
+  "version": "0.3.5",
+  "description": "Read, search, and write your GIEOK Obsidian Wiki from Claude Desktop or Claude Code.",
+  "long_description": "GIEOK is a personal knowledge base ('second brain') built on top of an Obsidian Vault. This MCP server exposes eight tools (gieok_search, gieok_read, gieok_list, gieok_write_note, gieok_write_wiki, gieok_delete, gieok_ingest_pdf, gieok_ingest_url) so that Claude Desktop and Claude Code can browse and update the Wiki without leaving the chat. All operations are local stdio — nothing leaves your machine. See https://github.com/gaebalai/gieok for the full project.",
+  "author": {
+    "name": "gaebalai",
+    "url": "https://github.com/gaebalai/gieok"
+  },
+  "homepage": "https://github.com/gaebalai/gieok",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gaebalai/gieok"
+  },
+  "documentation": "https://github.com/gaebalai/gieok/blob/main/README.md",
+  "support": "https://github.com/gaebalai/gieok/issues",
+  "license": "MIT",
+  "keywords": ["gieok", "obsidian", "wiki", "knowledge-base", "second-brain", "claude"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/server.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/server.mjs"],
+      "env": {
+        "OBSIDIAN_VAULT": "${user_config.vault_path}"
+      }
+    }
+  },
+  "user_config": {
+    "vault_path": {
+      "type": "directory",
+      "title": "Obsidian Vault directory",
+      "description": "Path to your GIEOK Vault — the directory that contains wiki/, session-logs/, raw-sources/. If you have not created a Vault yet, run scripts/setup-vault.sh from the gieok repo first.",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "node": ">=18"
+    }
+  },
+  "tools": [
+    {
+      "name": "gieok_search",
+      "description": "Full-text search across the Wiki (delegates to qmd CLI when available, falls back to a Node grep)."
+    },
+    {
+      "name": "gieok_read",
+      "description": "Return the contents of wiki/<path>.md (capped at 256 KB)."
+    },
+    {
+      "name": "gieok_list",
+      "description": "List the wiki/ directory tree (depth 1-5, max 1000 entries)."
+    },
+    {
+      "name": "gieok_write_note",
+      "description": "Append a memo to session-logs/. The next auto-ingest cycle structures it into wiki/. Recommended default."
+    },
+    {
+      "name": "gieok_write_wiki",
+      "description": "Write directly into wiki/ (template + frontmatter + wikilink injection, flock-protected). Use only when immediate publication is required."
+    },
+    {
+      "name": "gieok_delete",
+      "description": "Move a wiki page to wiki/.archive/ (recoverable). wiki/index.md is protected."
+    },
+    {
+      "name": "gieok_ingest_pdf",
+      "description": "Trigger immediate ingest for a PDF or markdown file under raw-sources/. Short PDFs (<=15 pages) block until summaries are produced (status: extracted_and_summarized). Longer PDFs return status: queued_for_summary and produce summaries in the background (1-3 min); poll wiki/summaries/ (expected_summaries) to retrieve them."
+    },
+    {
+      "name": "gieok_ingest_url",
+      "description": "Fetch an HTTP/HTTPS URL, extract article body (Mozilla Readability with LLM fallback), save Markdown + images under raw-sources/<subdir>/fetched/. PDF URLs auto-dispatch to gieok_ingest_pdf. Long PDFs return status: dispatched_to_pdf_queued while summary is produced in the background."
+    }
+  ]
+}
