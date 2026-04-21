@@ -85,12 +85,13 @@ export async function handleDelete(vault, args) {
     // 남은 상태로 wiki 페이지를 archive하면 broken_links_detected가 발화되지 않고
     // silent orphan이 되는 문제가 있었다.
     const vaultAbs = await realpath(vault);
-    const { brokenLinks, skippedLargeFiles } = await scanReferences(vaultAbs, wikiAbs, abs, targets);
+    const { brokenLinks, skippedLargeFiles, skippedUnreadable } =
+      await scanReferences(vaultAbs, wikiAbs, abs, targets);
 
     if (brokenLinks.length > 0 && !force) {
       const e = new Error('broken links detected (use force=true to override)');
       e.code = 'broken_links_detected';
-      e.data = { brokenLinks, skippedLargeFiles };
+      e.data = { brokenLinks, skippedLargeFiles, skippedUnreadable };
       throw e;
     }
 
@@ -114,6 +115,7 @@ export async function handleDelete(vault, args) {
       archivedPath: 'wiki/' + relative(wikiAbs, archiveAbs).split(sep).join('/'),
       brokenLinks,
       skippedLargeFiles,
+      skippedUnreadable,
     };
   });
 }
@@ -145,6 +147,10 @@ async function scanReferences(vaultAbs, wikiAbs, targetAbs, targetSet) {
   // 대상으로 넣는다. session-logs / .cache / .obsidian / node_modules 등은 제외.
   const out = [];
   const skipped = [];
+  // 2026-04-21 L-2 fix: readFile 실패를 silent catch 하지 않고 operator 가시성을 남긴다.
+  // SCAN_MAX_BYTES (size cap) 를 통과한 뒤 readFile 이 EACCES / EIO / ENOENT
+  // (symlink 끊김 등) 로 실패하면 skippedUnreadable[] 에 기록하여 caller 에 돌려준다.
+  const unreadable = [];
   // 디렉터리명 제외 (최상위 및 임의 계층)
   const excludeDirs = new Set([
     '.obsidian', '.archive', '.trash', 'templates',
@@ -191,12 +197,20 @@ async function scanReferences(vaultAbs, wikiAbs, targetAbs, targetSet) {
               inWiki,
             });
           }
-        } catch {
-          // skip unreadable
+        } catch (err) {
+          // L-2 fix: silent skip 하지 않고 skippedUnreadable[] 에 기록.
+          // error 필드는 운영측에서 EACCES / EIO / ENOENT 등을 구분할 수 있도록
+          // code 를 우선하고, 없으면 message 선두 200 char 로 truncate 한다
+          // (공격자 제어의 장대 error message 로 operator 가시성이 손상되지 않도록).
+          const relFromVault = relative(vaultAbs, childAbs).split(sep).join('/');
+          const errStr = typeof err?.code === 'string' && err.code
+            ? err.code
+            : String(err?.message ?? 'unknown').slice(0, 200);
+          unreadable.push({ sourcePath: relFromVault, error: errStr });
         }
       }
     }
   }
   await walk(vaultAbs);
-  return { brokenLinks: out, skippedLargeFiles: skipped };
+  return { brokenLinks: out, skippedLargeFiles: skipped, skippedUnreadable: unreadable };
 }

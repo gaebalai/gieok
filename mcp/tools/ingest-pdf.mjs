@@ -108,9 +108,12 @@ export async function handleIngestPdf(vault, args, injections = {}) {
     `gieok_ingest_pdf: processing ${pathArg}`,
   );
 
-  // skipLock: 기능 2.2 gieok_ingest_url이 PDF URL을 dispatch할 때, 외부에서 이미
-  // withLock을 취득했으므로 이중 취득 (deadlock or 60s timeout)을 피하기 위한 injection.
-  // 통상 호출에서는 undefined → withLock으로 감싼다.
+  // 2026-04-21 v0.4.0 Tier A#3 M-a4: skipLock injection을 완전 삭제했다.
+  // 구 구현에서는 ingest-url 이 outer withLock 을 보유한 채 handleIngestPdf 를
+  // skipLock=true 로 호출하여 이중 취득을 회피했지만, 이는 outer lock 을 최대
+  // 4.5분 보유하는 M-a2 문제의 원인이기도 했다. M-a2 수정 (ingest-url.mjs 의
+  // dispatch 를 withLock 밖으로 빼냄) 으로 skipLock 은 구조적으로 불필요해져 삭제.
+  // handleIngestPdf 는 항상 스스로 withLock 을 취득한다 (reentrant 판정 불필요).
   //
   // v0.3.5 Option B: Phase 1 (extract + analyze + decide)는 기존대로 lock 하에서
   // 실행한다. chunks >= DETACHED_CHUNK_THRESHOLD이면 `{ __queued }`를 반환하고,
@@ -250,16 +253,11 @@ export async function handleIngestPdf(vault, args, injections = {}) {
   };
 
   try {
-    // Phase 1 — lock 하에서 (or skipLock 시에는 그대로 통과) extract + decide
-    let phase1Result;
-    if (injections.skipLock) {
-      phase1Result = await phase1();
-    } else {
-      phase1Result = await withLock(vault, phase1, {
-        ttlMs: LOCK_TTL_MS,
-        timeoutMs: LOCK_ACQUIRE_TIMEOUT_MS,
-      });
-    }
+    // Phase 1 — lock 하에서 extract + decide (skipLock 은 v0.4.0 Tier A#3 에서 삭제)
+    const phase1Result = await withLock(vault, phase1, {
+      ttlMs: LOCK_TTL_MS,
+      timeoutMs: LOCK_ACQUIRE_TIMEOUT_MS,
+    });
 
     if (phase1Result.kind === 'done') {
       return phase1Result.result;
@@ -481,6 +479,10 @@ function buildIngestPrompt({ vault, chunkPages, subdirPrefix, stem, ext, needIng
     '  대응하는 wiki/summaries/<동일명>.md을 작성/갱신할 것.',
     '- chunk MD의 frontmatter에 source_sha256: "<64hex>"이 있으면, summary의 frontmatter에 한 글자도 다르지 않게 복사.',
     `- chunk가 2개 파일 이상인 경우에는 \`wiki/summaries/${safeSubdir}--${safeStem}-index.md\`을 부모 index로 생성.`,
+    '- **중요한 순서**: 먼저 모든 chunk summary (pp001-015.md / pp015-030.md / ...) 를 다 작성할 것.',
+    '  모든 chunk 완료 후에, 그것들을 가로지르는 index.md 를 synthesis 로 작성할 것',
+    '  (각 chunk summary 로의 wikilink + 전체 요지). chunk summary 를 쓰기 전에 index.md 를 먼저 쓰면,',
+    '  후반 chunk 의 내용이 index 에 반영되지 않아 불완전한 synthesis 가 된다.',
     '- chunk의 page_range를 summary frontmatter에 유지하고, 본문 서두에 page range를 한 마디 적는다.',
     '- 1페이지의 오버랩을 전제로 chunk summary 간의 중복을 피한다.',
     '- API 키 / 비밀번호 / 토큰 등의 비밀 정보는 절대 쓰지 말 것.',

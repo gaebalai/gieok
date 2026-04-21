@@ -2,7 +2,7 @@
 
 import { test, describe, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile, readdir, stat, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readdir, stat, readFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,6 +166,52 @@ describe('gieok_delete', () => {
           return smallInLinks !== undefined;
         },
       );
+    } finally { await cleanup(); }
+  });
+
+  test('MCP26e scanReferences records unreadable files in skippedUnreadable (L-2)', async () => {
+    // 2026-04-21 L-2 regression test: readFile 실패 (EACCES / EIO / ENOENT) 가
+    // silent catch 로 덮여서 operator 가 알아차리지 못하는 경로를 차단.
+    // chmod 0 (permission denied) 인 file 을 walk 에 포함시켜 skippedUnreadable[] 에
+    // 기록되는 것을 확인한다. macOS 에서 root 이외이면 EACCES 를 확실히 유발할 수 있다.
+    try {
+      await writeFile(join(vault, 'wiki', 'foo.md'),
+        '---\ntitle: Foo\n---\n\n# Foo\n');
+      const fetchedDir = join(vault, 'raw-sources', 'articles', 'fetched');
+      await mkdir(fetchedDir, { recursive: true });
+      // 일반 size & 읽기 불가능한 MD (permission denied)
+      const unreadablePath = join(fetchedDir, 'evil.com-locked.md');
+      await writeFile(unreadablePath, '---\nsource_url: "https://evil.com/"\n---\n\nsee [[Foo]]\n');
+      await chmod(unreadablePath, 0o000);
+      // 일반 size 의 읽기 가능한 MD 에도 wikilink 를 넣어 brokenLinks 쪽은 발화하게 한다
+      await writeFile(join(fetchedDir, 'normal.com-small.md'),
+        '---\nsource_url: "https://normal.com/"\n---\n\nsee [[Foo]]\n');
+
+      try {
+        await assert.rejects(
+          handleDelete(vault, { path: 'foo.md' }),
+          (err) => {
+            if (err.code !== 'broken_links_detected') return false;
+            const unreadable = err.data?.skippedUnreadable ?? [];
+            // 읽기 불가능 file 이 skippedUnreadable[] 에 실리는 것
+            const locked = unreadable.find((x) =>
+              x.sourcePath === 'raw-sources/articles/fetched/evil.com-locked.md'
+            );
+            if (!locked) return false;
+            assert.ok(typeof locked.error === 'string' && locked.error.length > 0,
+              'skippedUnreadable[].error must be a non-empty string');
+            // 읽기 가능 file 은 brokenLinks 에 실리는 것
+            const links = err.data?.brokenLinks ?? [];
+            const smallInLinks = links.find((x) =>
+              x.sourcePath === 'raw-sources/articles/fetched/normal.com-small.md'
+            );
+            return smallInLinks !== undefined;
+          },
+        );
+      } finally {
+        // cleanup 전에 permission 을 되돌리지 않으면 rm 이 실패한다
+        await chmod(unreadablePath, 0o644).catch(() => {});
+      }
     } finally { await cleanup(); }
   });
 

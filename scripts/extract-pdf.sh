@@ -37,6 +37,14 @@
 set -euo pipefail
 umask 077
 
+# 2026-04-21 (v0.3.7): Claude Desktop 은 GUI 앱으로 최소 PATH 로 기동되므로
+# Homebrew / MacPorts 하위의 pdfinfo / pdftotext (poppler) 나 Volta / mise 관리 하의
+# node 가 보이지 않는다. GUI 경유 MCP 호출 (gieok_ingest_pdf / gieok_ingest_url 의
+# PDF URL dispatch) 에서도 의존 명령을 발견할 수 있도록, auto-ingest.sh / auto-lint.sh 와
+# 동일한 공통 경로를 선두에 추가한다 (/opt/local/bin 은 MacPorts 사용자용, 말미의 기존 PATH
+# 로 cron / LaunchAgent 경로의 PATH 가 보존된다).
+export PATH="${HOME}/.local/share/mise/shims:${HOME}/.volta/bin:${HOME}/.local/bin:${HOME}/.npm-global/bin:/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:${PATH}"
+
 LOG_PREFIX="[extract-pdf]"
 
 # -----------------------------------------------------------------------------

@@ -816,6 +816,47 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Test F19 (v0.4.0 Tier A#2, 2026-04-21): detached HEAD 가드
+# rebase 중단 / detached checkout 상태에서 auto-ingest 가 돌면, guard 가 없으면
+# git commit 이 detached HEAD 선단에 쌓이고 push 실패로 로컬 drift 가 발생한다.
+# guard (git symbolic-ref -q HEAD) 로 git 쓰기를 통째로 skip + WARN 하는 것을 검증.
+# -----------------------------------------------------------------------------
+echo "test F19: detached HEAD state -> skip git commit/push + WARN"
+VAULT_F19="$(make_vault vault-f19)"
+add_unprocessed_log "${VAULT_F19}" "20260421-100000-test-f19"
+(
+  cd "${VAULT_F19}" && \
+  git init --quiet && \
+  git config user.email t@test && \
+  git config user.name t && \
+  echo 'session-logs/' > .gitignore && \
+  git add .gitignore && \
+  git commit -m init --quiet && \
+  git checkout --detach --quiet
+)
+# wiki/ 에 변경을 준비: guard 가 없다면 `git diff --cached` 가 비지 않게 되어
+# `git commit` 이 detached HEAD 선단에 쌓이는 시나리오를 재현한다.
+echo "content" > "${VAULT_F19}/wiki/new-page.md"
+
+before_sha_f19="$(cd "${VAULT_F19}" && git rev-parse HEAD)"
+
+set +e
+out_f19="$(
+  PATH="${STUB_DIR}:${PATH}" \
+  OBSIDIAN_VAULT="${VAULT_F19}" \
+  bash "${AUTO_INGEST}" 2>&1
+)"
+rc=$?
+set -e
+
+after_sha_f19="$(cd "${VAULT_F19}" && git rev-parse HEAD)"
+
+assert_eq "0" "${rc}" "F19 exit 0 (non-destructive fail-safe)"
+assert_contains "${out_f19}" "detached HEAD" "F19 stderr mentions detached HEAD"
+assert_contains "${out_f19}" "Recovery:" "F19 stderr provides recovery hint"
+assert_eq "${before_sha_f19}" "${after_sha_f19}" "F19 HEAD unchanged (guard prevented commit in detached state)"
+
+# -----------------------------------------------------------------------------
 # 요약
 # -----------------------------------------------------------------------------
 echo

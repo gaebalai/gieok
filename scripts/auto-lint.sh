@@ -261,6 +261,11 @@ elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # R4-006: .gitignore 에 session-logs/ 가 포함되어 있는지 확인한 뒤 git 작업
   if ! grep -q '^session-logs/' .gitignore 2>/dev/null; then
     echo "${LOG_PREFIX} WARNING: .gitignore missing 'session-logs/' entry. Skipping git commit/push for safety." >&2
+  # v0.4.0 Tier A#2 (2026-04-21): detached HEAD 가드 (auto-ingest.sh 와 동일 패턴)
+  # rebase 중단 / detached checkout 상태에서 돌면 commit 은 쌓여도 push 가 실패해 로컬 drift 발생.
+  elif ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+    echo "${LOG_PREFIX} WARNING: detached HEAD in vault; skipping git commit/push to avoid local drift." >&2
+    echo "${LOG_PREFIX}          Recovery: cd \"\${OBSIDIAN_VAULT}\" && git rebase --abort 2>/dev/null; git checkout main (or your working branch)" >&2
   else
     git add wiki/lint-report.md 2>/dev/null || true
     if git diff --cached --quiet 2>/dev/null; then

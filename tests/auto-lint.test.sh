@@ -425,6 +425,46 @@ if [[ -f "${CAPTURE_FILE_LINT}" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# G6 (v0.4.0 Tier A#2, 2026-04-21): detached HEAD 가드
+# rebase 중단 / detached checkout 상태에서 auto-lint 가 돌면, guard 가 없으면
+# git commit 이 detached HEAD 선단에 쌓이고 push 실패로 로컬 drift 가 발생한다.
+# guard (git symbolic-ref -q HEAD) 로 git 쓰기를 통째로 skip + WARN 하는 것을 검증.
+# -----------------------------------------------------------------------------
+echo "test G6: detached HEAD state -> skip git commit/push + WARN"
+VAULT_G6="$(make_vault vault-g6)"
+add_wiki_page "${VAULT_G6}" "page-g6"
+(
+  cd "${VAULT_G6}" && \
+  git init --quiet && \
+  git config user.email t@test && \
+  git config user.name t && \
+  echo 'session-logs/' > .gitignore && \
+  git add .gitignore && \
+  git commit -m init --quiet && \
+  git checkout --detach --quiet
+)
+# auto-lint 는 lint-report.md 를 쓰므로, DRY RUN 이 아닌 실제 실행 시 wiki/ 에
+# 변경이 생겨 `git add wiki/lint-report.md` 가 비지 않게 되는 것을 상정.
+# guard 가 없으면 detached HEAD 선단에 commit 이 쌓여버린다.
+before_sha_g6="$(cd "${VAULT_G6}" && git rev-parse HEAD)"
+
+set +e
+out_g6="$(
+  PATH="${STUB_DIR}:${PATH}" \
+  OBSIDIAN_VAULT="${VAULT_G6}" \
+  bash "${AUTO_LINT}" 2>&1
+)"
+rc=$?
+set -e
+
+after_sha_g6="$(cd "${VAULT_G6}" && git rev-parse HEAD)"
+
+assert_eq "0" "${rc}" "G6 exit 0 (non-destructive fail-safe)"
+assert_contains "${out_g6}" "detached HEAD" "G6 stderr mentions detached HEAD"
+assert_contains "${out_g6}" "Recovery:" "G6 stderr provides recovery hint"
+assert_eq "${before_sha_g6}" "${after_sha_g6}" "G6 HEAD unchanged (guard prevented commit in detached state)"
+
+# -----------------------------------------------------------------------------
 # 요약
 # -----------------------------------------------------------------------------
 echo

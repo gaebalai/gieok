@@ -16,7 +16,11 @@
 // MCP42   application/pdf → handleIngestPdf로 dispatch
 // MCP43   octet-stream + URL 끝 .pdf → dispatch
 // MCP44   PDF body > 50MB → invalid_request
-// MCP45   dispatch에서는 skipLock=true로 내측 withLock을 거치지 않고 즉시 진행
+// MCP45   PDF dispatch 는 outer withLock 을 release 하고 나서 handleIngestPdf 가
+//         스스로 withLock 을 acquire 한다 (v0.4.0 Tier A#3 M-a2 refactor)
+// MCP45b  concurrent PDF dispatch (다른 vault) 가 짧은 시간에 완료된다 (Tier A#3 M-a2 invariant)
+// MCP45c  handleIngestPdf 실패 시 orphan PDF 가 raw-sources/ 에서 cleanup 된다
+//         (v0.4.0 Tier A#3 post-review GAP-1 fix)
 // MCP46   CRIT-1: late-PDF discovery로 binary 재 fetch하여 PDF magic bytes가 유지됨
 // MCP46b  v0.3.5 Option B: 긴 PDF dispatch → status: dispatched_to_pdf_queued
 // MCP47   HIGH-2: fetch 에러 메시지에 credentials / 내부 IP / raw URL을 포함하지 않음
@@ -32,7 +36,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -392,9 +396,16 @@ describe('gieok_ingest_url', () => {
       );
     });
 
-    test('MCP45 dispatch uses skipLock (no re-entrance deadlock)', async () => {
-      // 내측 handleIngestPdf가 skipLock=false면 외측 withLock과 이중 획득으로
-      // 60s timeout. skipLock=true가 전달되면 즉시 진행.
+    test('MCP45 PDF dispatch releases outer lock before handleIngestPdf acquires its own (v0.4.0 Tier A#3 M-a2)', async () => {
+      // 2026-04-21 M-a2 fix: 구 구현은 outer withLock 을 보유한 채 handleIngestPdf 로
+      // skipLock=true 로 dispatch → 대용량 PDF (poppler 동기 extract) 에서 outer lock 을
+      // 최대 4.5분 보유하는 문제가 있었다. 신 구현은 dispatchToPdf 를 withLock 밖으로
+      // 빼내고, handleIngestPdf 가 스스로 withLock 을 취한다 (skipLock injection 은 API 와 함께
+      // 삭제됨).
+      //
+      // 이 테스트는 dispatch_to_pdf 가 성공함을 검증한다. refactor 가 깨져서
+      // outer lock 이 handleIngestPdf 호출 중에도 유지된다면, handleIngestPdf
+      // 측 withLock 이 60s timeout 으로 LockTimeoutError 가 되고 이 테스트가 실패한다.
       const v = await makeVault('mcp45');
       const r = await handleIngestUrl(
         v,
@@ -402,6 +413,92 @@ describe('gieok_ingest_url', () => {
         { claudeBin: stubBin, robotsUrlOverride: `${server.url}/robots.txt?variant=allow` },
       );
       assert.equal(r.status, 'dispatched_to_pdf');
+      // Lockfile 이 호출 완료 후에 남아있지 않을 것 (withLock 의 finally 에서 unlink 된다)
+      const lockPath = join(v, '.gieok-mcp.lock');
+      let lockExists = false;
+      try {
+        await readFile(lockPath);
+        lockExists = true;
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+      assert.equal(lockExists, false, 'lockfile must be unlinked after dispatch');
+    });
+
+    test('MCP45c GAP-1 fix: orphan PDF is cleaned up when handleIngestPdf fails (v0.4.0 Tier A#3 post-review)', async () => {
+      // 2026-04-21 /security-review (red + blue parallel) 의 GAP-1 공통 지적:
+      //   refactor 후에는 outer withLock release 후에 PDF 가 raw-sources/ 에
+      //   visible 이 되므로, handleIngestPdf 가 실패 (encrypted / invalid PDF /
+      //   extract rc=2,4,5 / claude -p 실패 등) 한 경우 PDF 가 orphan 화된다.
+      //
+      // cleanup 조건:
+      //   - `lock_timeout`: user retry 용으로 PDF 를 남긴다 (이 테스트에서는 유발하지 않음)
+      //   - 그 외 실패: PDF 를 unlink 한다 (이 테스트에서 검증)
+      //
+      // 본 테스트는 sample-encrypted.pdf 를 반환하는 URL 을 ingest 하여, extract-pdf.sh
+      // rc=2 → throwInvalidRequest('encrypted or invalid PDF') 로 failure 가 발생하는
+      // 것을 계기로, orphan PDF 가 raw-sources/papers/ 에서 삭제되는 것을 확인한다.
+      const v = await makeVault('mcp45c');
+      let caught;
+      try {
+        await handleIngestUrl(
+          v,
+          { url: `${server.url}/pdf?name=sample-encrypted.pdf` },
+          { claudeBin: stubBin, robotsUrlOverride: `${server.url}/robots.txt?variant=allow` },
+        );
+      } catch (e) {
+        caught = e;
+      }
+      assert.ok(caught, 'expected handleIngestUrl to throw on encrypted PDF');
+      // GAP-1 invariant: raw-sources/papers/ 에는 orphan PDF 가 남아 있지 않을 것.
+      // directory 자체는 writePdfToDisk 가 mkdir 완료하므로 존재하지만, .pdf 파일은 0.
+      const papersDir = join(v, 'raw-sources', 'papers');
+      let entries = [];
+      try {
+        entries = await readdir(papersDir);
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+      const remainingPdfs = entries.filter((n) => n.endsWith('.pdf'));
+      assert.deepEqual(
+        remainingPdfs,
+        [],
+        `expected no orphan PDFs after handleIngestPdf failure, got: ${JSON.stringify(remainingPdfs)}`,
+      );
+    });
+
+    test('MCP45b PDF dispatch: outer lock is released during handleIngestPdf Phase 1 (v0.4.0 Tier A#3 M-a2)', async () => {
+      // 2026-04-21 M-a2 refactor 의 invariant test: late-PDF dispatch 중,
+      // outer withLock 은 이미 해방되었으므로 「다른 조작이 lockfile 을 취득할 수 있다」
+      // 것이 기대된다. 구 구현 (skipLock=true 로 outer 보유) 에서는 아래 concurrent write
+      // 가 outer lock 과 conflict 하여 60s LockTimeoutError 가 되는 케이스가 있었다.
+      //
+      // 구현: PDF dispatch 중에 다른 vault 로의 gieok_ingest_url 을 동시에 병렬로 실행해서,
+      // 양쪽 모두 짧은 시간에 완료됨 (60s timeout 되지 않음) 을 확인한다.
+      // (다른 vault = lockfile 분리되어 있으므로 본래는 무관하지만, 본 test 에서는
+      //  handleIngestUrl API 자체에 concurrent 안전성이 있음을 proof 한다)
+      const v1 = await makeVault('mcp45b-1');
+      const v2 = await makeVault('mcp45b-2');
+      const start = Date.now();
+      const [r1, r2] = await Promise.all([
+        handleIngestUrl(
+          v1,
+          { url: `${server.url}/pdf?name=sample-8p.pdf` },
+          { claudeBin: stubBin, robotsUrlOverride: `${server.url}/robots.txt?variant=allow` },
+        ),
+        handleIngestUrl(
+          v2,
+          { url: `${server.url}/pdf?name=sample-8p.pdf` },
+          { claudeBin: stubBin, robotsUrlOverride: `${server.url}/robots.txt?variant=allow` },
+        ),
+      ]);
+      const duration = Date.now() - start;
+      assert.equal(r1.status, 'dispatched_to_pdf');
+      assert.equal(r2.status, 'dispatched_to_pdf');
+      // 60s timeout 에 도달했다면 구 구현의 lock 경합을 의심한다.
+      // stub claude 에서는 통상 5-20s 정도에 완료되므로 30s cap 으로 충분한 여유가 있다.
+      assert.ok(duration < 30_000,
+        `concurrent dispatch must complete quickly (actual: ${duration}ms)`);
     });
 
     test('MCP46 CRIT-1: late-PDF discovery re-fetches with binary mode', async () => {

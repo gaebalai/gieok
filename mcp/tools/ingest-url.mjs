@@ -1,6 +1,7 @@
 // gieok_ingest_url — 기능 2.2 MCP tool.
 //
 // 설계서: plan/claude/26041801_feature-2-2-html-url-ingest-design.md §4.1 §4.7
+//         plan/claude/26042102_meeting_v0-4-0-lock-refactor-decision.md (v0.4.0 refactor)
 // 플로우:
 //   1. URL 검증 (SSRF / scheme / credentials) — withLock 바깥에서 선행 reject
 //   2. withLock(vault) — cron auto-ingest.sh / gieok_ingest_pdf와 `.gieok-mcp.lock`을 공유
@@ -8,12 +9,22 @@
 //   4. robots.txt를 확인 (defense-in-depth: HTML 경로에서는 extractAndSaveUrl 내에서도 재평가)
 //   5. Content-Type 분기:
 //        text/html / application/xhtml+xml → extractAndSaveUrl에 위임
-//        application/pdf / (octet-stream + URL 말미 .pdf) → handleIngestPdf에 skipLock=true로 dispatch
+//        application/pdf / (octet-stream + URL 말미 .pdf) → inner 가 __pendingPdfDispatch signal
+//          을 반환. outer withLock **release 후** 에 handleIngestPdf 를 호출하고, PDF 처리 측이
+//          스스로 withLock 을 취득한다 (v0.4.0 Tier A#3 M-a2/M-a4)
 //   6. extractAndSaveUrl이 후단에서 PDF를 감지 (리다이렉트 목적지가 PDF였던 경우 등)한 경우에도
 //      err.code === 'not_html' && err.pdfCandidate === true로 PDF 경로로 rerouting.
 //      이때 extractAndSaveUrl의 fetch는 **비바이너리**이므로 body는 UTF-8 문자열로
 //      PDF를 유지할 수 없다. late-PDF 경로에서는 반드시 재 fetch (binary:true) 한다 (CRIT-1).
 //   7. 결과 JSON을 반환
+//
+// v0.4.0 Tier A#3 의 lock refactor 요점 (2026-04-21):
+//   - 구 구현은 PDF dispatch 시에 outer withLock 을 최대 4.5분 보유하는 경로가 있었다
+//     (대용량 PDF 의 poppler 동기 extract). 신 구현은 PDF disk write 까지 (수 초) 에서
+//     outer 를 release 하고, handleIngestPdf 로 하여금 스스로 withLock 을 재취득하게 한다.
+//   - 이 변경으로 `skipLock` injection 이 불필요해졌기 때문에 API 자체를 삭제.
+//   - race window 의 실해는 없음: gieok_delete 는 wiki/ 이하만 대상 / sha256 멱등으로 중복
+//     ingest 도 safe / auto-ingest.sh 와의 경합은 신규 리스크가 아님 (기존 semantic).
 //
 // 보안 요점:
 //   - 외부에서 URL validation (validateUrl)을 마치고 나서 lock 취득
@@ -25,7 +36,7 @@
 //   - 에러 문자열에 attacker-controlled URL / 내부 IP / credentials를 싣지 않는다
 //     (HIGH-2: prompt-injection / SSRF info leak 대책). code-only로 MCP 경계를 넘긴다.
 
-import { mkdir, open, rename } from 'node:fs/promises';
+import { mkdir, open, rename, unlink } from 'node:fs/promises';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -126,9 +137,14 @@ export const INGEST_URL_TOOL_DEF = {
 /**
  * @param {string} vault
  * @param {{url: string, subdir?: string, title?: string, source_type?: string, tags?: string[], refresh_days?: number|'never', max_turns?: number}} args
- * @param {{claudeBin?: string, robotsUrlOverride?: string, skipLock?: boolean}} [injections]
- *   skipLock: WARNING — only set true when the caller already holds withLock(vault, ...).
- *   Used internally by the late-PDF dispatch path; do not pass from external callers.
+ * @param {{claudeBin?: string, robotsUrlOverride?: string, sendProgress?: Function}} [injections]
+ *
+ * 2026-04-21 v0.4.0 Tier A#3 M-a2/M-a4 refactor:
+ * - PDF dispatch 시 outer withLock 보유 시간을 최대 4.5분 → 수 초로 단축하기 위해,
+ *   inner() 은 PDF 쓰기까지를 withLock 하에서 수행하고, handleIngestPdf 호출은
+ *   outer withLock **release 후** 에 실행하는 구조로 변경.
+ * - skipLock injection 은 삭제 (API surface 축소). handleIngestPdf 는 항상 스스로
+ *   withLock 을 취득한다 (이 파일이 가진 outer withLock 은 그 시점에 released).
  */
 export async function handleIngestUrl(vault, args, injections = {}) {
   validate(args);
@@ -212,14 +228,21 @@ export async function handleIngestUrl(vault, args, injections = {}) {
       // PDF의 기본 subdir은 'papers' (기능 2의 PDF 배치 규약과 정합).
       // 사용자가 명시적으로 subdir을 지정한 경우에는 그것을 존중한다.
       const pdfSubdir = (args.subdir == null) ? 'papers' : subdir;
-      return await dispatchToPdf({
+      // outer withLock 하에서 PDF 를 disk 에 atomic write 한다.
+      // handleIngestPdf 호출은 outer withLock release **후** 에 수행한다
+      // (inner 에서 __pendingPdfDispatch signal 을 반환하여 지시한다).
+      const { pdfRelPath } = await writePdfToDisk({
         vault,
         subdir: pdfSubdir,
         url,
         body: fetchResult.body,
-        claudeBin: injections.claudeBin,
-        sendProgress: injections.sendProgress,
       });
+      return {
+        __pendingPdfDispatch: true,
+        vault,
+        pdfRelPath,
+        url,
+      };
     }
 
     if (!ct.includes('text/html') && !ct.includes('application/xhtml+xml')) {
@@ -262,14 +285,20 @@ export async function handleIngestUrl(vault, args, injections = {}) {
           throwInvalidRequest('PDF exceeds size cap');
         }
         const pdfSubdir = (args.subdir == null) ? 'papers' : subdir;
-        return await dispatchToPdf({
+        // late-PDF 경로에서도 outer withLock 내에서 PDF 를 disk 에 write 하고,
+        // handleIngestPdf 호출은 outer withLock release 후에 수행한다 (상동).
+        const { pdfRelPath } = await writePdfToDisk({
           vault,
           subdir: pdfSubdir,
           url,
           body: refetch.body,
-          claudeBin: injections.claudeBin,
-          sendProgress: injections.sendProgress,
         });
+        return {
+          __pendingPdfDispatch: true,
+          vault,
+          pdfRelPath,
+          url,
+        };
       }
       // HIGH-2: extractAndSaveUrl 유래의 에러도 raw message를 누설하지 않고 code only로 반환
       if (err && err.code === 'extraction_failed') throwInternal(`extraction failed: ${err.code}`);
@@ -279,10 +308,61 @@ export async function handleIngestUrl(vault, args, injections = {}) {
   };
 
   try {
-    if (injections.skipLock) {
-      return await inner();
+    // 2026-04-21 M-a2/M-a4 refactor: outer withLock 은 fetch + (PDF 이면) disk write
+    // 까지를 지킨다. inner 가 __pendingPdfDispatch signal 을 반환한 경우에는, withLock
+    // release **후** 에 handleIngestPdf 를 호출하여 스스로 withLock 을 취득하게 한다.
+    // 이로써 outer lock 의 보유 시간이 4.5분 → 수 초로 단축된다.
+    const innerResult = await withLock(vault, inner, {
+      ttlMs: LOCK_TTL_MS,
+      timeoutMs: LOCK_ACQUIRE_TIMEOUT_MS,
+    });
+
+    if (innerResult && innerResult.__pendingPdfDispatch) {
+      // outer withLock 은 이미 release 완료 (withLock 의 finally 에서 lockfile unlink 완료).
+      // handleIngestPdf 가 스스로 withLock 을 acquire 한다.
+      //
+      // 2026-04-21 v0.4.0 Tier A#3 post-review GAP-1 fix (red/blue 공통 지적):
+      // handleIngestPdf 가 실패한 경우, outer withLock 은 이미 release 되어 있으므로
+      // PDF 파일이 raw-sources/ 에 orphan 으로 영속화된다. 구 skipLock 설계에서는
+      // 전체가 하나의 try/finally 안에 있었기 때문에 orphan 이 관찰되기 어려웠지만, 신 design
+      // 에서는 명시적 cleanup 이 필요.
+      //
+      // cleanup 분기 판정:
+      //   - `lock_timeout`: user retry 의 여지가 있으므로 PDF 를 보유 (다음 호출에서 처리됨)
+      //   - 그 외 (encrypted_or_invalid / extract rc=2,4,5 / claude -p 실패): PDF 가
+      //     processable 하지 않음이 판명되었으므로 삭제. best-effort (unlink 실패는
+      //     operator 측에서 수동 cleanup 하면 된다)
+      let pdfResult;
+      try {
+        pdfResult = await handleIngestPdf(
+          innerResult.vault,
+          { path: innerResult.pdfRelPath },
+          {
+            claudeBin: injections.claudeBin,
+            sendProgress: injections.sendProgress,
+          },
+        );
+      } catch (err) {
+        if (err?.code !== 'lock_timeout') {
+          try {
+            await unlink(join(innerResult.vault, innerResult.pdfRelPath));
+          } catch {
+            /* best-effort: orphan PDF cleanup 실패는 본체 에러를 가리지 않는다 */
+          }
+        }
+        throw err;
+      }
+      return {
+        status: pdfResult.status === 'queued_for_summary'
+          ? 'dispatched_to_pdf_queued'
+          : 'dispatched_to_pdf',
+        url: innerResult.url,
+        path: innerResult.pdfRelPath,
+        pdf_result: pdfResult,
+      };
     }
-    return await withLock(vault, inner, { ttlMs: LOCK_TTL_MS, timeoutMs: LOCK_ACQUIRE_TIMEOUT_MS });
+
+    return innerResult;
   } finally {
     await stopHeartbeat('gieok_ingest_url: done');
   }
@@ -356,7 +436,12 @@ function sanitizeForError(s) {
   return cleaned.length > 100 ? `${cleaned.slice(0, 100)}…` : cleaned;
 }
 
-async function dispatchToPdf({ vault, subdir, url, body, claudeBin, sendProgress }) {
+// 2026-04-21 v0.4.0 Tier A#3 M-a2: 구 dispatchToPdf 는 「PDF 를 disk 에 쓴다」 와
+// 「handleIngestPdf 를 호출한다」 를 하나로 수행하고 있었다 (outer withLock 을 4.5분 보유하는 원인).
+// refactor 후에는 이 헬퍼는 **PDF 를 disk 에 쓸 때까지** (outer withLock 하에서 실행 가능)
+// 를 담당하고, handleIngestPdf 호출은 handleIngestUrl 측에서 outer withLock **release 후**
+// 에 수행한다.
+async function writePdfToDisk({ vault, subdir, url, body }) {
   if (!body) throwInternal('PDF body missing for dispatch');
   // urlToFilename은 <host>-<slug>.md을 반환하므로 확장자만 교체한다.
   const name = urlToFilename(url).replace(/\.md$/, '.pdf');
@@ -377,21 +462,8 @@ async function dispatchToPdf({ vault, subdir, url, body, claudeBin, sendProgress
   }
   await rename(tmp, absPath);
 
-  // 내부 handleIngestPdf로 dispatch — 외부에서 withLock을 이미 보유 중이므로 skipLock=true.
-  // v0.3.4: sendProgress도 전파하여 PDF 처리 중에도 heartbeat이 계속 흐르게 한다.
-  // v0.3.5 Option B: 긴 PDF는 handleIngestPdf가 `queued_for_summary`로 조기 return
-  // 한다. 그 경우 dispatchToPdf 측의 status도 `dispatched_to_pdf_queued`로 승격시켜,
-  // client가 "summary는 몇 분 후 wiki/summaries/에 출현한다"는 취지를 명시적으로 알 수 있게 한다.
-  const pdfResult = await handleIngestPdf(
-    vault,
-    { path: `raw-sources/${subdir}/${name}` },
-    { claudeBin, skipLock: true, sendProgress },
-  );
   return {
-    status: pdfResult.status === 'queued_for_summary' ? 'dispatched_to_pdf_queued' : 'dispatched_to_pdf',
-    url,
-    path: `raw-sources/${subdir}/${name}`,
-    pdf_result: pdfResult,
+    pdfRelPath: `raw-sources/${subdir}/${name}`,
   };
 }
 

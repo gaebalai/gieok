@@ -693,3 +693,95 @@ describe('session-logger: index corruption recovery', () => {
     }
   });
 });
+
+// v0.4.0 Tier B#1 — Hook 계층 re-audit findings 의 회귀 테스트
+// 참조: security-review/meeting/2026-04-21_hook-layer-reaudit.md
+describe('session-logger: v0.4.0 Tier B#1 regression', () => {
+  // RED-L0-01 / BLUE-L0-01: Hook 경로의 maskText 적용 (INVISIBLE_CHARS + NFC)
+  test('masks tokens that contain zero-width invisibles (INVISIBLE_CHARS bypass)', async () => {
+    const { root, vault } = await createVault();
+    try {
+      // U+200B (ZWSP) 를 prefix 경계에 삽입한 API key 는 구 mask() 에서는 통과했지만,
+      // maskText() 는 INVISIBLE_CHARS_RE 로 전처리하므로 매치되어야 한다.
+      const zwspKey = 'sk-ant-​abcdefghijklmnopqrstuvwxyz';
+      const softHyphenKey = 'ghp_­abcdefghijklmnopqrstuvwxyz';
+      await runHook(vault, {
+        session_id: 'test-session-b1-01',
+        hook_event_name: 'UserPromptSubmit',
+        cwd: '/tmp',
+        prompt: `zwsp=${zwspKey} soft=${softHyphenKey}`,
+      });
+      const body = await readFirstSessionFile(vault);
+      assert.ok(!body.includes('abcdefghijklmnopqrstuvwxyz'),
+        'raw 20-char suffix must not survive masking');
+      assert.match(body, /sk-ant-\*\*\*/);
+      assert.match(body, /ghp_\*\*\*/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // RED-L0-02: frontmatter YAML value injection
+  test('buildFrontmatter neutralizes newline/--- injection in cwd', async () => {
+    const { root, vault } = await createVault();
+    try {
+      const evilCwd = '/tmp/x\n---\ntype: injected\nrelated: ["/etc/passwd"]';
+      await runHook(vault, {
+        session_id: 'test-session-b1-02',
+        hook_event_name: 'UserPromptSubmit',
+        cwd: evilCwd,
+        prompt: 'hello',
+      });
+      const body = await readFirstSessionFile(vault);
+      // frontmatter 는 반드시 하나의 `---` 시작과 하나의 `---` 종료로 닫혀야 한다
+      const fmMatch = body.match(/^---\n([\s\S]*?)\n---\n/);
+      assert.ok(fmMatch, 'frontmatter must be well-formed');
+      const fm = fmMatch[1];
+      // 주입된 type/related 키가 frontmatter 에 추가되지 않을 것
+      assert.ok(!/\ntype: injected/.test(fm), 'injected `type:` key must not appear');
+      assert.ok(!/\nrelated: \["\/etc\/passwd"\]/.test(fm),
+        'injected `related:` key must not appear');
+      // cwd 는 단일 인용부로 quote 되고, 제어 문자가 제거된 상태로 남는다
+      assert.match(fm, /^cwd: '/m);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // BLUE-L0-02: GIEOK_NO_LOG 의 truthy drift 대책
+  for (const truthy of ['true', 'yes', 'on', 'TRUE', 'Yes']) {
+    test(`GIEOK_NO_LOG=${truthy} suppresses output (envTruthy)`, async () => {
+      const { root, vault } = await createVault();
+      try {
+        const { code } = await runHook(vault, {
+          session_id: `test-session-b1-03-${truthy.toLowerCase()}`,
+          hook_event_name: 'UserPromptSubmit',
+          prompt: 'should be suppressed',
+        }, { GIEOK_NO_LOG: truthy });
+        assert.strictEqual(code, 0);
+        const files = await listSessionFiles(vault);
+        assert.strictEqual(files.length, 0,
+          `no session file should be created when GIEOK_NO_LOG=${truthy}`);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test('GIEOK_NO_LOG=false or empty does NOT suppress output', async () => {
+    const { root, vault } = await createVault();
+    try {
+      await runHook(vault, {
+        session_id: 'test-session-b1-03-false',
+        hook_event_name: 'UserPromptSubmit',
+        cwd: '/tmp',
+        prompt: 'should be recorded',
+      }, { GIEOK_NO_LOG: 'false' });
+      const files = await listSessionFiles(vault);
+      assert.strictEqual(files.length, 1,
+        'falsy value must not trigger no-op (only 1/true/yes/on activate)');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

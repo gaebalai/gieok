@@ -10,7 +10,7 @@ import { appendFile, mkdir, readFile, writeFile, rename, open, stat, realpath } 
 import { dirname, join } from 'node:path';
 import { hostname } from 'node:os';
 
-import { MASK_RULES } from '../scripts/lib/masking.mjs';
+import { maskText as mask } from '../scripts/lib/masking.mjs';
 
 // -----------------------------------------------------------------------------
 // 상수
@@ -31,13 +31,41 @@ const BASH_BLOCKLIST = new Set([
 
 // 마스킹 규칙 (MASK_RULES)은 ../scripts/lib/masking.mjs 에 집약했다.
 // 새 패턴 추가 시에는 그쪽 주석 (동기 대상 3곳)을 참조할 것.
+// v0.4.0 Tier B#1: 구 자체 mask() 를 삭제하고 maskText() 에 위임.
+// INVISIBLE_CHARS 제거 + NFC 정규화를 Hook 경로에도 적용 (RED-L0-01 / BLUE-L0-01).
+
+// 환경 변수의 진위 판정을 1 / true / yes / on (case-insensitive) 로 통일한다.
+// 기본은 fail-safe (값이 모호하면 falsy 쪽이 아닌 truthy 에 가깝게) 설계.
+// GIEOK_NO_LOG 는 "true" 로도 발화되어야 한다 (재귀 로그 방지의 본의).
+// v0.4.0 Tier B#1 (BLUE-L0-02): strict `=== '1'` 의 truthy drift 대책.
+function envTruthy(val) {
+  if (!val) return false;
+  return /^(1|true|yes|on)$/i.test(String(val).trim());
+}
+
+// YAML 스칼라 값을 안전하게 임베드하기 위한 헬퍼.
+// - 제어 문자 (U+0000..U+001F, U+007F) 와 Unicode 불가시/구분 문자를 제거.
+// - YAML 구조 문자를 포함하는 경우 단일 인용부로 감싸고, 단일 인용부 자체는 '' 로 이중화한다.
+// v0.4.0 Tier B#1 (RED-L0-02): frontmatter injection 대책.
+// session_id / cwd / project_dir 가 개행이나 `---` 를 포함해 YAML 경계를 위장
+// 할 수 없도록 한다.
+function yamlSafeValue(v) {
+  if (v == null) return '';
+  let s = String(v)
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/[\u200B-\u200F\u2028-\u2029\uFEFF]/g, '');
+  if (/[:#&*!|>'"%@`[\]{},]|^\s|\s$|^[-?~]|^(null|true|false|yes|no|on|off)$/i.test(s)) {
+    return `'${s.replace(/'/g, "''")}'`;
+  }
+  return s;
+}
 
 // -----------------------------------------------------------------------------
 // 유틸리티
 // -----------------------------------------------------------------------------
 
 function debugLog(ctx, msg) {
-  if (process.env.GIEOK_DEBUG !== '1') return;
+  if (!envTruthy(process.env.GIEOK_DEBUG)) return;
   process.stderr.write(`[claude-brain] ${msg}\n`);
   writeErrorLog(ctx, `DEBUG: ${msg}`).catch(() => {});
 }
@@ -51,15 +79,6 @@ async function writeErrorLog(ctx, msg) {
   } catch {
     // 무시: 에러 로그 쓰기 실패는 묵살
   }
-}
-
-function mask(text) {
-  if (typeof text !== 'string') return text;
-  let out = text;
-  for (const [re, rep] of MASK_RULES) {
-    out = out.replace(re, rep);
-  }
-  return out;
 }
 
 // 로컬 타임존 기반 타임스탬프 생성 (OSS-001: Asia/Tokyo 하드코딩 폐지)
@@ -222,11 +241,11 @@ function buildFrontmatter(payload, ts) {
   const lines = [
     '---',
     'type: session-log',
-    `session_id: ${payload.session_id}`,
-    `hostname: ${hostname()}`,
-    `cwd: ${payload.cwd || ''}`,
+    `session_id: ${yamlSafeValue(payload.session_id)}`,
+    `hostname: ${yamlSafeValue(hostname())}`,
+    `cwd: ${yamlSafeValue(payload.cwd || '')}`,
     `date: ${ts.iso}`,
-    `project_dir: ${projectDir || 'null'}`,
+    `project_dir: ${projectDir ? yamlSafeValue(projectDir) : 'null'}`,
     'ingested: false',
     'related: []',
     '---',
@@ -455,11 +474,13 @@ const HANDLERS = {
 // -----------------------------------------------------------------------------
 
 async function main() {
-  // GIEOK_NO_LOG=1 일 때는 훅 전체를 no-op 화한다.
+  // GIEOK_NO_LOG 가 truthy (1 / true / yes / on) 일 때는 훅 전체를 no-op 화한다.
   // auto-ingest.sh / auto-lint.sh 가 기동하는 claude -p 서브프로세스는
   // 부모의 ~/.claude/settings.json 을 상속하므로 이 플래그가 없으면
   // 서브프로세스 자신의 활동이 session-logs/ 에 재귀적으로 기록되어 버린다.
-  if (process.env.GIEOK_NO_LOG === '1') return;
+  // v0.4.0 Tier B#1 (BLUE-L0-02): strict `=== '1'` 에서 envTruthy 경유로 변경하여,
+  // 사용자가 직감적으로 `=true` 라고 쓴 경우의 silent drift 를 방지 (fail-safe).
+  if (envTruthy(process.env.GIEOK_NO_LOG)) return;
 
   const vault = process.env.OBSIDIAN_VAULT;
   if (!vault) return;

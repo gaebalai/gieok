@@ -33,6 +33,50 @@ for arg in "$@"; do
 done
 
 # -----------------------------------------------------------------------------
+# GitHub-side lock (α): 2026-04-21 NEW-L2 fix (v0.4.0 Tier B#3)
+#
+# 2대 운용 (MacBook + Mac mini) 에서 cron sync 가 근접한 시각에 기동되면, 양쪽이
+# 동일한 내용으로 origin/next 에 push 해 중복 PR 이 생기는 race 조건이 있다 (증상 #1).
+# gieok 의 origin/next 최종 push 시각을 gh CLI 로 확인해 임계 초 이내에
+# 다른 run 이 push 를 끝냈다면 이 run 은 조기 exit 해 중복 push 를 회피한다.
+#
+# Config:
+#   GIEOK_SYNC_LOCK_MAX_AGE  임계값 (초). 기본 120. 0 을 지정하면 무효화.
+#
+# Fail-open:
+#   - gh auth 실패 / network error / rate limit: 모두 현상 유지 (guard skip).
+#   - 어느 한쪽 Mac 에서 gh 가 무효면 이 guard 는 작동하지 않음. trade-off 로 수용.
+#
+# Design:
+#   - --dry-run 에서는 skip (operator 가 수동 검증할 때 guard 로 막지 않도록).
+#   - `git fetch` 직후에 호출한다. branch checkout 보다 앞에 넣어
+#     push 예정 branch 를 만드는 비용을 조기에 회피한다.
+#   - exit 시에는 기존 trap 이 .git-gieok 를 복원한다.
+#
+# Reference: 합의 기록 plan/claude/26042104_meeting...md ## Resume session 2
+# -----------------------------------------------------------------------------
+check_github_side_lock() {
+  [[ "${DRY_RUN:-0}" == "1" ]] && return 0
+  local max_age="${GIEOK_SYNC_LOCK_MAX_AGE:-120}"
+  (( max_age <= 0 )) && return 0
+
+  local last_push_iso last_push_epoch now_epoch age
+  last_push_iso="$(gh api repos/gaebalai/gieok/branches/next \
+      --jq .commit.commit.committer.date 2>/dev/null || true)"
+  [[ -z "${last_push_iso}" ]] && return 0  # gh 미인증 / network error → fail-open
+
+  last_push_epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "${last_push_iso}" +%s 2>/dev/null || echo 0)"
+  now_epoch="$(date -u +%s)"
+  age=$(( now_epoch - last_push_epoch ))
+
+  if (( age >= 0 && age < max_age )); then
+    echo "  [skip] origin/next was pushed ${age}s ago (<${max_age}s); another sync likely just completed" >&2
+    exit 0
+  fi
+  return 0
+}
+
+# -----------------------------------------------------------------------------
 # 전제 체크
 # -----------------------------------------------------------------------------
 
@@ -71,6 +115,11 @@ mv .git-gieok .git
 # 어질러진다 (feature 2.2 릴리스 시의 WT drift 문제). fetch 실패는 허용.
 git fetch origin --quiet 2>/dev/null || true
 
+# 2026-04-21 NEW-L2 (v0.4.0 Tier B#3): cross-machine race guard.
+# gh api 로 origin/next 의 최종 push 시각을 얻어 임계값 이내이면 조기 exit.
+# --dry-run / GIEOK_SYNC_LOCK_MAX_AGE=0 에서 skip. gh 에러는 fail-open.
+check_github_side_lock
+
 # 2026-04-20: rebase-merge 운용에서 origin/next 의 이력이 rewrite 되는
 # (gieok main 으로 rebase-merge 된 commit 이 origin/main 에 존재하고, 로컬
 # next 에 남은 pre-rebase commit 과 diverge 되어 PR 이 CONFLICT) 케이스 + WT 가
@@ -87,7 +136,11 @@ if git show-ref --quiet refs/remotes/origin/main 2>/dev/null; then
   # git stash list 로 나중에 복구 가능.
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
     local_dirty_stash=1
-    git stash push -u -m "sync-to-app auto-stash $(date +%Y%m%d-%H%M%S)" --quiet 2>/dev/null || true
+    # 2026-04-21 NEW-L1 fix: stash message 에 `$$` (shell PID) 를 섞어서 1초 이내의
+    # 연속 호출에서도 message 가 충돌하지 않도록 한다. macOS `date` 는 `%N`
+    # (nanosec) 을 지원하지 않으므로 PID 로 유일화한다. `git stash list` 로 recovery 하는
+    # operator 가 이력을 구별할 수 있다.
+    git stash push -u -m "sync-to-app auto-stash $(date +%Y%m%d-%H%M%S)-pid$$" --quiet 2>/dev/null || true
     echo "  [notice] dirty WT detected; uncommitted changes stashed. Recover with: cd $(pwd) && mv .git-gieok .git && git stash list" >&2
   fi
   # -B: 기존이면 reset, 없으면 create. --force 상당으로 WT 의 untracked 는 제거하지 않지만

@@ -480,6 +480,15 @@ elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # NEW-009: .gitignore 에 session-logs/ 가 포함되어 있는지 확인한 뒤 git 작업 수행
   if ! grep -q '^session-logs/' .gitignore 2>/dev/null; then
     echo "${LOG_PREFIX} WARNING: .gitignore missing 'session-logs/' entry. Skipping git commit/push for safety." >&2
+  # v0.4.0 Tier A#2 (2026-04-21): detached HEAD 가드
+  # rebase 중단 / git bisect / detached checkout 등으로 HEAD 가 branch 에서 벗어나면
+  # `git commit` 은 성공해도 push 대상 branch 가 정해지지 않아 `git push` 가 조용히 실패하고,
+  # commit 이 reflog 에만 쌓일 뿐 remote 에 반영되지 않는다 (Mac mini 에서 2026-04-16〜04-21
+  # 에 5일간 drift 를 실측). git symbolic-ref -q HEAD 로 branch 를 확인해 detached 이면
+  # 모든 git 쓰기를 skip 하고 복구 절차를 WARN 으로 안내한다 (처리는 비파괴적으로 계속).
+  elif ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+    echo "${LOG_PREFIX} WARNING: detached HEAD in vault; skipping git commit/push to avoid local drift." >&2
+    echo "${LOG_PREFIX}          Recovery: cd \"\${OBSIDIAN_VAULT}\" && git rebase --abort 2>/dev/null; git checkout main (or your working branch)" >&2
   else
     git add wiki/ raw-sources/ templates/ CLAUDE.md 2>/dev/null || true
     if git diff --cached --quiet 2>/dev/null; then

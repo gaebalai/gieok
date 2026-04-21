@@ -329,24 +329,9 @@ describe('gieok_ingest_pdf', { skip: !HAS_POPPLER ? 'poppler not installed' : fa
     assert.equal(result2.status, 'extracted_and_summarized');
   });
 
-  test('MCP30c skipLock injection bypasses withLock (기능 2.2 PDF dispatch 용)', async () => {
-    // 기능 2.2 gieok_ingest_url이 PDF URL을 내부 dispatch할 때, 외측에서
-    // withLock을 이미 보유했으므로 handleIngestPdf 측은 재획득을 스킵해야 함.
-    // skipLock=true면 외부에서 lockfile이 잡혀 있어도 타임아웃 없이 즉시 진행.
-    const vault = await makeVault('mcp30c-skiplock');
-    await cp(join(FIXTURES, 'sample-8p.pdf'), join(vault, 'raw-sources', 'papers', 'noloc.pdf'));
-    // 다른 PID의 lockfile을 가짜로 둔다 (TTL 내 살아있는 취급)
-    const lockPath = join(vault, '.gieok-mcp.lock');
-    await writeFile(lockPath, '99999\n');
-    try {
-      const result = await handleIngestPdf(
-        vault,
-        { path: 'raw-sources/papers/noloc.pdf' },
-        { claudeBin: claudeBin(), skipLock: true },
-      );
-      assert.equal(result.status, 'extracted_and_summarized');
-    } finally {
-      await rm(lockPath, { force: true });
-    }
-  });
+  // 2026-04-21 v0.4.0 Tier A#3 M-a4: skipLock injection 을 삭제했으므로,
+  // 구 MCP30c (skipLock bypass 동작 테스트) 는 API 와 함께 소멸.
+  // 새로운 invariant 는 MCP45 (tools-ingest-url.test.mjs) 측에서 검증한다:
+  // - gieok_ingest_url → PDF dispatch 경로에서 handleIngestPdf 가 스스로 withLock 을
+  //   취득한다 (outer withLock 은 dispatch 전에 release 된다) 는 것이 정합성의 요체.
 });

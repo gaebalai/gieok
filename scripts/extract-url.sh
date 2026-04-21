@@ -31,6 +31,16 @@ LOG_PREFIX="[extract-url]"
 # 되는 경로를 막는다. 셸 쪽에서 명시적으로 unset 하여 node CLI 에 전파하지 않는다.
 # 테스트 목적으로 loopback fixture-server 를 허용하고 싶다면
 # `GIEOK_ALLOW_LOOPBACK_IN_CRON=1` 을 지정할 것 (최소한의 allowlist flag).
+#
+# 2026-04-21 NEW-L2: `GIEOK_ALLOW_LOOPBACK_IN_CRON` / `GIEOK_ALLOW_IGNORE_ROBOTS_IN_CRON`
+# 는 shell 계층의 테스트 전용 gate 이며, 의도적으로 `mcp/lib/child-env.mjs` 의
+# `ENV_ALLOW_EXACT` allowlist 에는 싣지 않았다. 이유:
+#   1. node CLI (`url-extract-cli.mjs`) 쪽은 `GIEOK_URL_ALLOW_LOOPBACK` /
+#      `GIEOK_URL_IGNORE_ROBOTS` 만 읽는다 (명명이 별체계인 것은 의도된 것)
+#   2. 위 `_IN_CRON` flag 를 `ENV_ALLOW_EXACT` 에 추가하면, cron 이외의 caller
+#      (MCP tool 경유의 `gieok_ingest_url` 등) 가 같은 flag 로 bypass 를 발동할 수
+#      있게 되어, shell 계층에서 unset 하고 있는 LOW-d4 방어가 무너진다 (security regression).
+# 향후 누군가 「allowlist 에 넣으면 simpler」 라고 생각해도 이 별체계는 유지할 것.
 if [[ "${GIEOK_ALLOW_LOOPBACK_IN_CRON:-0}" != "1" ]]; then
   unset GIEOK_URL_ALLOW_LOOPBACK
 fi
