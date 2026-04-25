@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "gieok-wiki",
   "display_name": "GIEOK Wiki",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Read, search, and write your GIEOK Obsidian Wiki from Claude Desktop or Claude Code.",
   "long_description": "GIEOK is a personal knowledge base ('second brain') built on top of an Obsidian Vault. This MCP server exposes eight tools (gieok_search, gieok_read, gieok_list, gieok_write_note, gieok_write_wiki, gieok_delete, gieok_ingest_pdf, gieok_ingest_url) so that Claude Desktop and Claude Code can browse and update the Wiki without leaving the chat. All operations are local stdio — nothing leaves your machine. See https://github.com/gaebalai/gieok for the full project.",
   "author": {

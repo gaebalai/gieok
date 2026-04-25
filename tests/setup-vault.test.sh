@@ -128,6 +128,21 @@ assert_file_exists "${VAULT}/CLAUDE.md" "CLAUDE.md placed"
 assert_file_exists "${VAULT}/.gitignore" ".gitignore placed"
 assert_file_exists "${VAULT}/wiki/index.md" "wiki/index.md placed"
 assert_file_exists "${VAULT}/wiki/log.md" "wiki/log.md placed"
+
+# DB-V1 (v0.6 Phase C-4): Obsidian Bases 대시보드 배치 검증
+assert_dir_exists "${VAULT}/wiki/meta" "wiki/meta dir created (DB-V1)"
+assert_file_exists "${VAULT}/wiki/meta/dashboard.base" "wiki/meta/dashboard.base placed (DB-V1)"
+if grep -q '^filters:$' "${VAULT}/wiki/meta/dashboard.base" 2>/dev/null; then
+  pass "dashboard.base has filters: section (DB-V1)"
+else
+  fail "dashboard.base should have 'filters:' root key (DB-V1)"
+fi
+if grep -q 'name: "Hot Cache' "${VAULT}/wiki/meta/dashboard.base" 2>/dev/null; then
+  pass "dashboard.base references Hot Cache view (DB-V1)"
+else
+  fail "dashboard.base should include Hot Cache view (DB-V1)"
+fi
+
 assert_file_exists "${VAULT}/templates/concept.md" "templates/concept.md placed"
 assert_file_exists "${VAULT}/templates/project.md" "templates/project.md placed"
 assert_file_exists "${VAULT}/templates/decision.md" "templates/decision.md placed"
@@ -169,16 +184,21 @@ fi
 echo "test: idempotency"
 # 사용자 편집을 모방
 echo "user-edited content" > "${VAULT}/wiki/index.md"
+# DB-V2: dashboard.base 의 user 커스터마이즈도 멱등하게 유지되어야 함 (v0.6 Phase C-4)
+printf -- 'filters:\n  and:\n    - file.inFolder("wiki")\n\nviews:\n  - type: table\n    name: "My Custom View"\n' > "${VAULT}/wiki/meta/dashboard.base"
 user_claude_hash_before="$(shasum "${VAULT}/CLAUDE.md" | awk '{print $1}')"
 user_index_hash_before="$(shasum "${VAULT}/wiki/index.md" | awk '{print $1}')"
+user_base_hash_before="$(shasum "${VAULT}/wiki/meta/dashboard.base" | awk '{print $1}')"
 
 OBSIDIAN_VAULT="${VAULT}" bash "${SETUP_VAULT}" >/dev/null
 
 user_claude_hash_after="$(shasum "${VAULT}/CLAUDE.md" | awk '{print $1}')"
 user_index_hash_after="$(shasum "${VAULT}/wiki/index.md" | awk '{print $1}')"
+user_base_hash_after="$(shasum "${VAULT}/wiki/meta/dashboard.base" | awk '{print $1}')"
 
 assert_eq "${user_claude_hash_before}" "${user_claude_hash_after}" "CLAUDE.md unchanged on re-run"
 assert_eq "${user_index_hash_before}" "${user_index_hash_after}" "user-edited wiki/index.md preserved"
+assert_eq "${user_base_hash_before}" "${user_base_hash_after}" "user-edited dashboard.base preserved (DB-V2)"
 
 # -----------------------------------------------------------------------------
 # Test 6: 기존 CLAUDE.md가 있으면 CLAUDE.brain.md로 대피

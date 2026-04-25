@@ -134,6 +134,7 @@ DIRS=(
   "wiki/people"
   "wiki/summaries"
   "wiki/analyses"
+  "wiki/meta"
   "templates"
 )
 
@@ -209,6 +210,11 @@ copy_if_missing \
 copy_if_missing \
   "${TEMPLATES_DIR}/wiki/log.md" \
   "${OBSIDIAN_VAULT}/wiki/log.md"
+
+# v0.6 Phase C-4: Obsidian Bases dashboard (wiki/meta/ 하위, 사용자가 Obsidian 에서 여는 대시보드)
+copy_if_missing \
+  "${TEMPLATES_DIR}/wiki/meta/dashboard.base" \
+  "${OBSIDIAN_VAULT}/wiki/meta/dashboard.base"
 
 copy_if_missing \
   "${TEMPLATES_DIR}/notes/concept.md" \

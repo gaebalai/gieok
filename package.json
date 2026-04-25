@@ -1,6 +1,6 @@
 {
   "name": "gieok",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Memory for Claude Code — automatic session capture and LLM-curated Obsidian Wiki.",
   "bin": {
     "gieok": "bin/gieok.mjs"
