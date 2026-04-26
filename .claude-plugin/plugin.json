@@ -3,8 +3,7 @@
   "version": "0.6.0",
   "description": "GIEOK — Hardened LLM Wiki for Claude Code + Claude Desktop. Automatic conversation capture to Obsidian Vault, Karpathy LLM Wiki pattern, hot cache + PostCompact hook, secret masking, cross-machine Git sync. Research/legal/enterprise-grade memory for Claude.",
   "author": {
-    "name": "gaebalai",
-    "url": "https://github.com/gaebalai"
+    "name": "gaebalai"
   },
   "license": "MIT",
   "homepage": "https://github.com/gaebalai/gieok",

@@ -1,8 +1,7 @@
 {
   "name": "gaebalai-marketplace",
   "owner": {
-    "name": "gaebalai",
-    "url": "https://github.com/gaebalai"
+    "name": "gaebalai"
   },
   "metadata": {
     "description": "GIEOK: Hardened LLM Wiki for Claude Code / Claude Desktop",
@@ -14,13 +13,12 @@
       "source": {
         "source": "github",
         "repo": "gaebalai/gieok",
-        "ref": "main"
+        "ref": "v0.6.0"
       },
       "description": "Hardened LLM Wiki for Claude Code + Claude Desktop. Automatic conversation → Obsidian Vault knowledge base. Hot cache + PostCompact hook + secret masking + Git sync.",
       "version": "0.6.0",
       "author": {
-        "name": "gaebalai",
-        "url": "https://github.com/gaebalai"
+        "name": "gaebalai"
       },
       "homepage": "https://github.com/gaebalai/gieok",
       "repository": "https://github.com/gaebalai/gieok",

@@ -10,7 +10,7 @@ GIEOK 는 3 가지 설치 방법이 있습니다:
 | 방법 | 용도 | 대상 |
 |---|---|---|
 | **1. `.mcpb` bundle** | Claude Desktop / Claude Code (GUI) 로의 drag & drop | 최종 사용자, 최속 |
-| **2. Claude Code plugin (본 문서)** | `claude plugin install` 명령으로 install / update | 개발자, 버전 관리 중시 |
+| **2. Claude Code plugin (본 문서)** | `/plugin install` 슬래시 명령으로 install / update | 개발자, 버전 관리 중시 |
 | **3. Manual setup** | repo clone + `install-hooks.sh` | contributor, 커스터마이즈 운용 |
 
 본 문서는 **방법 2 (plugin install)** 을 안내합니다. 방법 1 은 [README](../README.md), 방법 3 은 [README #Quick-Start](../README.md#🚀-인터랙티브-설정) 를 참조.
@@ -23,22 +23,23 @@ GIEOK 는 3 가지 설치 방법이 있습니다:
 
 ## 방법 A: marketplace 경유로 설치
 
-```bash
+Claude Code 대화창에서 슬래시 명령으로 입력합니다 (셸 명령이 아님):
+
+```text
 # 1. marketplace 등록 (최초 1회)
-claude marketplace add gaebalai/gieok
+/plugin marketplace add gaebalai/gieok
 
 # 2. plugin install
-claude plugin install gieok@gaebalai-marketplace
+/plugin install gieok@gaebalai-marketplace
 
-# 3. 동작 확인
-claude plugin list | grep gieok
-# => gieok  0.6.0  (installed)
+# 3. 동작 확인 — 출력에서 gieok 0.6.0 (installed) 확인
+/plugin list
 ```
 
 ## 방법 B: repo 를 직접 지정해 설치
 
-```bash
-claude plugin install github:gaebalai/gieok
+```text
+/plugin install github:gaebalai/gieok
 ```
 
 ## Post-install 절차
@@ -124,36 +125,39 @@ bash ~/.claude/plugins/gieok/scripts/setup-multi-agent.sh
 
 ## Upgrade
 
-```bash
-claude plugin upgrade gieok
+Claude Code 대화창에서:
+
+```text
+/plugin upgrade gieok
 ```
 
 GIEOK 는 SemVer 을 따릅니다. major bump (0.x → 1.0) 에서 breaking change 가 있는 경우 Release note 에 `BREAKING:` 을 명시합니다.
 
 ## Uninstall
 
-```bash
-# 1. plugin 제거
-claude plugin uninstall gieok
+1. **plugin 제거** (Claude Code 대화창에서):
 
-# 2. Hook 설정을 수동으로 제거
-# ~/.claude/settings.json 에서 GIEOK 관련 hook entry 를 제거
-# (install-hooks.sh 의 backup 이 ~/.claude/settings.json.backup.<timestamp> 에 있어 복원 가능)
+   ```text
+   /plugin uninstall gieok
+   ```
 
-# 3. LaunchAgent (macOS 의 경우)
-launchctl unload ~/Library/LaunchAgents/com.gieok.ingest.plist
-launchctl unload ~/Library/LaunchAgents/com.gieok.lint.plist
-rm ~/Library/LaunchAgents/com.gieok.*.plist
+2. **Hook 설정을 수동으로 제거** — `~/.claude/settings.json` 에서 GIEOK 관련 hook entry 를 제거 (`install-hooks.sh` 의 backup 이 `~/.claude/settings.json.backup.<timestamp>` 에 있어 복원 가능).
 
-# 4. (선택) Vault 삭제
-# rm -rf "$OBSIDIAN_VAULT"  # 주의: knowledge base 도 사라짐
-```
+3. **LaunchAgent** (macOS 의 경우, 셸에서):
+
+   ```bash
+   launchctl unload ~/Library/LaunchAgents/com.gieok.ingest.plist
+   launchctl unload ~/Library/LaunchAgents/com.gieok.lint.plist
+   rm ~/Library/LaunchAgents/com.gieok.*.plist
+   ```
+
+4. **(선택) Vault 삭제** — `rm -rf "$OBSIDIAN_VAULT"` (주의: knowledge base 도 사라짐).
 
 ## 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `claude plugin install` 에서 not found | marketplace 미등록 | `claude marketplace add gaebalai/gieok` 를 먼저 실행 |
+| `/plugin install` 에서 not found | marketplace 미등록 | `/plugin marketplace add gaebalai/gieok` 를 먼저 실행 |
 | session log 가 생성되지 않음 | Hook 이 `~/.claude/settings.json` 에 없음 | `install-hooks.sh --apply` 재실행 |
 | hot.md 가 LLM 에 도달하지 않음 | `$OBSIDIAN_VAULT` env 미설정 / Vault 외 심볼릭 링크 escape | `echo $OBSIDIAN_VAULT` 로 확인, `realpath` 로 link 대상 확인 |
 | auto-ingest 가 안 움직임 | LaunchAgent / cron 미설치 | `install-schedule.sh` 실행 / `launchctl list | grep gieok` 로 확인 |
