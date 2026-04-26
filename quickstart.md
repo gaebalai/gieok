@@ -1,4 +1,4 @@
-# Quickstart — Gieok v0.5.1
+# Quickstart — Gieok v0.6.0
 
 ## ⚡ 원라이너 설치 (가장 빠름)
 
@@ -44,7 +44,7 @@ Claude Desktop 에서 Vault 를 직접 읽고 쓰려면 `.mcpb` 번들을 사용
 
 ```bash
 bash ~/.local/share/gieok/repo/scripts/build-mcpb.sh
-# → gieok-wiki-0.5.1.mcpb 생성 → Claude Desktop 으로 drag & drop → Vault 디렉터리 지정 → ⌘Q 로 완전 재시작
+# → gieok-wiki-0.6.0.mcpb 생성 → Claude Desktop 으로 drag & drop → Vault 디렉터리 지정 → ⌘Q 로 완전 재시작
 ```
 
 Claude Code / CLI 클라이언트는 직접 등록:
@@ -52,6 +52,27 @@ Claude Code / CLI 클라이언트는 직접 등록:
 ```bash
 bash ~/.local/share/gieok/repo/scripts/install-mcp-client.sh
 ```
+
+### 📦 Claude Code 플러그인 마켓플레이스 (v0.6 신규)
+
+Claude Code 사용자는 대화창에서 슬래시 명령으로 한 번에 설치 가능 (셸 명령이 아님):
+
+```text
+/plugin marketplace add gaebalai/gieok
+/plugin install gieok@gaebalai-marketplace
+```
+
+상세한 post-install 절차(Vault 초기화 · Hook 주입 · 트러블슈팅)는 [docs/install-guide-plugin.md](docs/install-guide-plugin.md) 참조.
+
+### 🤖 멀티 에이전트 (v0.6 신규)
+
+Codex CLI / OpenCode / Gemini CLI 에도 같은 skills 세트를 symlink 로 배포 (멱등):
+
+```bash
+bash ~/.local/share/gieok/repo/scripts/setup-multi-agent.sh
+```
+
+배포 경로 — Codex `~/.codex/skills/gieok` / OpenCode `~/.config/opencode/skills/gieok` / Gemini `~/.gemini/skills/gieok`. 다른 에이전트에서는 **skills (슬래시 커맨드) 만 동작**하며 자동 세션 캡처는 Claude Code 전용입니다. 자세한 매트릭스는 [README #멀티-에이전트-지원](README.md#-멀티-에이전트-지원-v06-신규) 참조.
 
 ---
 
