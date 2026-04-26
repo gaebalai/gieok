@@ -7,9 +7,9 @@
 # `skills/` 디렉터리 전체를 `<agent-root>/skills/gieok/` 로 symlink 한다.
 #
 # 에이전트의 slash command / skill 인식 경로:
-#   Codex CLI        : ~/.codex/skills/gieok       (참조: https://github.com/openai/codex)
-#   OpenCode         : ~/.opencode/skills/gieok    (참조: opencode.ai)
-#   Gemini CLI       : ~/.gemini/skills/gieok      (참조: https://github.com/google-gemini/gemini-cli)
+#   Codex CLI        : ~/.codex/skills/gieok               (참조: https://developers.openai.com/codex/skills)
+#   OpenCode         : ~/.config/opencode/skills/gieok     (참조: https://opencode.ai/docs/skills/)
+#   Gemini CLI       : ~/.gemini/skills/gieok              (참조: https://geminicli.com/docs/cli/skills/)
 #
 # 사용법:
 #   bash setup-multi-agent.sh                    # 멱등하게 모든 에이전트에 symlink
@@ -23,7 +23,7 @@
 #
 # 환경 변수 (테스트 override):
 #   GIEOK_CODEX_SKILLS_DIR    — default: $HOME/.codex/skills
-#   GIEOK_OPENCODE_SKILLS_DIR — default: $HOME/.opencode/skills
+#   GIEOK_OPENCODE_SKILLS_DIR — default: $HOME/.config/opencode/skills
 #   GIEOK_GEMINI_SKILLS_DIR   — default: $HOME/.gemini/skills
 
 set -euo pipefail
@@ -35,7 +35,7 @@ SKILLS_SRC_DIR="$(cd "${SCRIPT_DIR}/../skills" && pwd)"
 # 새 에이전트 추가 시 여기를 확장
 AGENTS=(
   "codex|${GIEOK_CODEX_SKILLS_DIR:-${HOME}/.codex/skills}"
-  "opencode|${GIEOK_OPENCODE_SKILLS_DIR:-${HOME}/.opencode/skills}"
+  "opencode|${GIEOK_OPENCODE_SKILLS_DIR:-${HOME}/.config/opencode/skills}"
   "gemini|${GIEOK_GEMINI_SKILLS_DIR:-${HOME}/.gemini/skills}"
 )
 
@@ -165,5 +165,5 @@ if [[ ${UNINSTALL} -eq 0 && ${DRY_RUN} -eq 0 && ${CREATED} -gt 0 ]]; then
   echo "다음 verify 단계:"
   echo "  - Codex CLI:  codex --list-skills 2>/dev/null | grep -i gieok"
   echo "  - Gemini CLI: gemini --list-skills 2>/dev/null | grep -i gieok"
-  echo "  - OpenCode:   ls ~/.opencode/skills/gieok/"
+  echo "  - OpenCode:   ls ~/.config/opencode/skills/gieok/"
 fi
